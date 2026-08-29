@@ -9,11 +9,6 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./9r-proxy
-    permissions:
-      contents: write
 
     steps:
       - name: 📥 检出代码
@@ -26,42 +21,33 @@ jobs:
           cache: pip
 
       - name: 📦 安装依赖
-        run: pip install -r requirements.txt
+        run: pip install requests
 
-      - name: 📡 抓取 TG 节点
-        id: fetch
-        env:
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
-          TG_SESSION_STR: ${{ secrets.TG_SESSION_STR }}
-        run: python tg-fetch.py
-
-      - name: 🔄 同步 9router 代理池
+      - name: 🔄 下载并测试代理
         id: sync
         env:
-          R9_BASE_URL: ${{ vars.R9_BASE_URL }}
-          R9_PASSWORD: ${{ secrets.R9_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python proxy-manager.py
+          TEST_CONCURRENCY: "8"
+          TEST_TIMEOUT: "5"
+        run: python proxy-fetch.py
 
       - name: 📄 提交 socks5-otc.txt
         if: always()
-        working-directory: .   # 覆盖默认，回到仓库根目录
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          if [ -f 9r-proxy/socks5-otc.txt ]; then
+          if [ -f socks5-otc.txt ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add 9r-proxy/socks5-otc.txt
+            git add socks5-otc.txt
             if git diff --cached --quiet; then
               echo "⏭️ socks5-otc.txt 无变化，跳过提交"
             else
-              git commit -m "🔄 chore: 更新 9r-proxy socks5-otc.txt"
+              git commit -m "🔄 chore: 更新 socks5-otc.txt $(date -u '+%Y-%m-%d')"
               git push
               echo "✅ 已提交并推送 socks5-otc.txt"
             fi
           else
-            echo "⚠️ socks5-otc.txt 未生成，检查上一步是否失败"
+            echo "⚠️ socks5-otc.txt 未生成"
           fi
