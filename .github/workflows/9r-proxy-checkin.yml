@@ -21,11 +21,16 @@ jobs:
           cache: pip
 
       - name: 📦 安装依赖
-        run: pip install requests
+        run: |
+          pip install requests==2.31.0
+          pip install beautifulsoup4==4.12.0
 
-      - name: 🔄 下载并同步代理池
+      - name: 🔄 同步代理池
         env:
+          R9_BASE_URL: ${{ secrets.R9_BASE_URL }}
           R9_PASSWORD: ${{ secrets.R9_PASSWORD }}
+          PROXY_USER: ${{ secrets.PROXY_USER }}
+          PROXY_PASS: ${{ secrets.PROXY_PASS }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python proxy-manager.py

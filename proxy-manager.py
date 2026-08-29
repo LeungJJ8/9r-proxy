@@ -2,8 +2,8 @@
 """
 9router 代理池同步脚本（GitHub Actions 专用）
 
-直接从 GitHub 下载 socks5-otc.txt 代理列表，同步到 9router：
-1. 从 GitHub 下载最新 socks5-otc.txt
+从 proxy-socks5.com 登录抓取代理列表，同步到 9router：
+1. 登录 proxy-socks5.com 获取代理列表
 2. 用 R9_PASSWORD 登录 9router，获取 auth_token
 3. 获取现有代理池，以 ip:port（name）为去重键
 4. 只增不减：新增不存在的节点
@@ -15,6 +15,8 @@
   R9_PASSWORD    9router API 登录密码
   TG_BOT_TOKEN   TG 通知机器人 Token（可选）
   TG_CHAT_ID     TG 通知接收 Chat ID（可选）
+  PROXY_USER     proxy-socks5.com 登录用户名
+  PROXY_PASS     proxy-socks5.com 登录密码
 """
 
 import os
@@ -24,21 +26,26 @@ import logging
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
+from collections import Counter
 
-# GitHub 上的 socks5-otc.txt 地址
-PROXY_FILE_URL = "https://raw.githubusercontent.com/yutian81/Keepalive/main/9r-proxy/socks5-otc.txt"
+# proxy-socks5.com 配置
+PROXY_SITES_LOGIN_URL = "http://proxy-socks5.com/login"
+PROXY_SITES_PROXY_LIST_URL = "http://proxy-socks5.com/proxy_list"
+PROXY_USER = os.getenv("PROXY_USER") or "leung0108"
+PROXY_PASS = os.getenv("PROXY_PASS") or "123456"
 
+# 9router 配置
 BASE_URL = os.getenv("R9_BASE_URL") or "https://9rou.argo.indevs.in"
 PASSWORD = os.getenv("R9_PASSWORD") or ""
-TYPE_ALLOWED = {"socks5", "http"}    # 只处理这些类型
+TYPE_ALLOWED = {"socks5", "http"}  # 只处理这些类型
 
 # 并行测试配置
-TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "8")  # 并行线程数
-TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "10")         # 单次测试超时（秒）
-DEAD_RATIO_LIMIT = float(os.getenv("DEAD_RATIO_LIMIT") or "0.9")  # 系统异常保护阈值
+TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "8")
+TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "10")
+DEAD_RATIO_LIMIT = float(os.getenv("DEAD_RATIO_LIMIT") or "0.9")
 
-# 解析节点 URL: scheme://user:pass@ip:port
-NODE_RE = re.compile(r"(socks5|http)://[^\s#@]+@(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
+# 解析节点 URL: scheme://ip:port 或 scheme://user:pass@ip:port
+NODE_RE = re.compile(r"(socks5|http)s?://(?:[^\s#@]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,27 +55,100 @@ logging.basicConfig(
 log = logging.getLogger("proxy-manager")
 
 
-def download_proxies():
-    """从 GitHub 下载代理列表"""
-    log.info("📥 正在从 GitHub 下载代理列表...")
-    try:
-        resp = requests.get(PROXY_FILE_URL, timeout=15)
-        resp.raise_for_status()
-        proxies = [line.strip() for line in resp.text.splitlines() if line.strip()]
-        log.info("✅ 下载成功，共 %d 个代理节点", len(proxies))
-        return proxies
-    except Exception as e:
-        log.error("❌ 下载失败: %s", e)
+# ================= Proxy List Fetching =================
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': PROXY_SITES_LOGIN_URL
+}
+
+def login_and_fetch():
+    """登录 proxy-socks5.com 并获取代理列表页面 HTML"""
+    session = requests.Session()
+
+    # 1. 访问登录页
+    resp = session.get(PROXY_SITES_LOGIN_URL, headers=HEADERS, timeout=15)
+    if resp.status_code != 200:
+        log.error("访问登录页失败: %s", resp.status_code)
+        return ""
+
+    # 2. 提交登录
+    login_data = {'username': PROXY_USER, 'password': PROXY_PASS}
+    login_resp = session.post(PROXY_SITES_LOGIN_URL, data=login_data, headers=HEADERS, allow_redirects=False, timeout=15)
+    if login_resp.status_code in (200, 302):
+        log.info("✅ proxy-socks5.com 登录成功")
+
+        # 3. 获取代理列表
+        resp = session.get(PROXY_SITES_PROXY_LIST_URL, headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            return resp.text
+
+    log.error("登录或获取代理列表失败")
+    return ""
+
+
+def has_x_ip(proxy):
+    """检查代理 IP 是否包含 x/X（掩码隐藏的 IP）"""
+    m = NODE_RE.match(proxy)
+    if not m:
+        return False
+    ip = m.group(2)
+    return 'x' in ip.lower()
+
+
+def parse_proxies_from_html(html):
+    """解析代理列表，提取协议类型 + IP:Port，并过滤掉带 x/X 的 IP"""
+    proxies = []
+    seen = set()
+
+    # 方法1: 从 badge-type + data-proxy 匹配
+    card_pattern = r'<div class="proxy-card"[^>]*data-proxy="([^"]+)"[^>]*>.*?badge badge-type[^>]*>(\w+)<'
+    for match in re.finditer(card_pattern, html, re.DOTALL):
+        ip_port = match.group(1)
+        protocol = match.group(2).lower()
+        proxy = f"{protocol}://{ip_port}"
+        if proxy not in seen and not has_x_ip(proxy):
+            seen.add(proxy)
+            proxies.append(proxy)
+
+    # 方法2: 从 table tbody 解析
+    if not proxies:
+        tbody_match = re.search(r'<tbody>(.*?)</tbody>', html, re.DOTALL)
+        if tbody_match:
+            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', tbody_match.group(1), re.DOTALL)
+            for row in rows:
+                type_match = re.search(r'badge badge-type[^>]*>(\w+)<', row)
+                # 提取 IP
+                ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', row)
+                # 提取端口
+                port_match = re.search(r'<td[^>]*>(\d+)</td>', row)
+
+                if type_match and ip_match:
+                    protocol = type_match.group(1).lower()
+                    ip = ip_match.group(1)
+                    port = port_match.group(1) if port_match else "1080"
+                    proxy = f"{protocol}://{ip}:{port}"
+                    if proxy not in seen and not has_x_ip(proxy):
+                        seen.add(proxy)
+                        proxies.append(proxy)
+
+    return proxies
+
+
+def fetch_proxies():
+    """从 proxy-socks5.com 登录抓取所有协议类型的代理"""
+    log.info("📥 正在从 proxy-socks5.com 登录抓取代理列表...")
+    html = login_and_fetch()
+    if not html:
         return []
 
-
-def parse_node(url):
-    """解析节点 URL，返回 (scheme, ip, port, name) 或 None"""
-    m = NODE_RE.match(url)
-    if not m:
-        return None
-    scheme, ip, port = m.group(1), m.group(2), m.group(3)
-    return scheme, ip, port, f"{ip}:{port}"
+    proxies = parse_proxies_from_html(html)
+    if proxies:
+        proto_count = Counter(p.split("://")[0] for p in proxies)
+        log.info("✅ 抓取成功，共 %d 个有效代理", len(proxies))
+        for proto, count in proto_count.most_common():
+            log.info("  %s: %d 个", proto, count)
+    return proxies
 
 
 # ================= Session 管理 =================
@@ -117,10 +197,14 @@ def api_get_pools(session):
 
 def api_add_pool(session, name, proxy_url):
     """新增代理池"""
+    # 解析协议类型
+    m = NODE_RE.match(proxy_url)
+    pool_type = m.group(1) if m else "socks5"
+
     payload = {
         "name": name,
         "proxyUrl": proxy_url,
-        "type": "http",
+        "type": pool_type,
         "isActive": True,
         "strictProxy": False,
     }
@@ -167,8 +251,10 @@ def is_type_allowed(pool_type):
 
 def extract_name(proxy_url):
     """从 proxyUrl 提取 ip:port 作为 name"""
-    parsed = parse_node(proxy_url)
-    return parsed[3] if parsed else proxy_url
+    m = NODE_RE.match(proxy_url)
+    if m:
+        return f"{m.group(2)}:{m.group(3)}"
+    return proxy_url
 
 
 def send_tg_notification(stats):
@@ -187,21 +273,19 @@ def send_tg_notification(stats):
             f"⚠️ <b>9Router 代理池异常保护</b>\n"
             f"----------------\n"
             f"📅 <b>日期</b>：{date_str}\n"
-            f"📥 <b>GitHub 下载</b>：{stats['fetched']} 个节点\n"
+            f"📥 <b>抓取节点</b>：{stats['fetched']} 个\n"
             f"🚫 <b>检测到系统性异常</b>：不通比例超过 90%\n"
             f"🛡️ <b>已跳过删除</b>，代理池保持原状\n"
-            f"📄 <b>socks5-otc.txt</b> 未更新"
         )
     else:
         message = (
             f"🎉 <b>9Router 代理池更新</b>\n"
             f"----------------\n"
             f"📅 <b>日期</b>：{date_str}\n"
-            f"📥 <b>GitHub 下载</b>：{stats['fetched']} 个节点\n"
+            f"📥 <b>抓取节点</b>：{stats['fetched']} 个\n"
             f"➕ <b>新增</b>：{stats['added']} 个\n"
             f"❌ <b>删除</b>：{stats['deleted']} 个（测试不通）\n"
             f"✅ <b>最终可用</b>：{stats['total']} 个\n"
-            f"📄 <b>socks5-otc.txt</b> 已更新"
         )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -224,25 +308,17 @@ def send_tg_notification(stats):
 
 def main():
     log.info("=" * 48)
-    log.info("9router 代理池同步启动（GitHub 直连）")
+    log.info("9router 代理池同步启动（proxy-socks5.com 直连抓取）")
     log.info("目标服务: %s", BASE_URL)
 
     stats = {"fetched": 0, "added": 0, "deleted": 0, "total": 0, "fail_added": 0, "anomaly": False}
 
-    # 1. 从 GitHub 下载代理列表
-    new_proxies = download_proxies()
+    # 1. 从 proxy-socks5.com 登录抓取代理列表
+    new_proxies = fetch_proxies()
     if not new_proxies:
         log.error("❌ 未获取到代理节点，退出")
         sys.exit(1)
     stats["fetched"] = len(new_proxies)
-
-    # 解析节点
-    new_nodes = []
-    for url in new_proxies:
-        parsed = parse_node(url)
-        if parsed:
-            new_nodes.append({"url": url, "scheme": parsed[0], "ip": parsed[1], "port": parsed[2], "name": parsed[3]})
-    log.info("解析有效节点: %d 个", len(new_nodes))
 
     # 2. 登录 9router
     session = make_session()
@@ -261,12 +337,12 @@ def main():
     log.info("现有代理池（允许类型）: %d 个", len(existing))
 
     # 4. 只增不减：新增不存在的节点
-    for node in new_nodes:
-        name = node["name"]
+    for proxy in new_proxies:
+        name = extract_name(proxy)
         if name not in existing:
-            if api_add_pool(session, name, node["url"]):
+            if api_add_pool(session, name, proxy):
                 stats["added"] += 1
-                log.info("➕ 新增节点: %s", node["url"])
+                log.info("➕ 新增节点: %s", proxy)
             else:
                 stats["fail_added"] += 1
 
