@@ -23,14 +23,13 @@ jobs:
       - name: 📦 安装依赖
         run: pip install requests
 
-      - name: 🔄 下载并测试代理
-        id: sync
+      - name: 🔄 下载并同步代理池
         env:
+          R9_BASE_URL: ${{ vars.R9_BASE_URL }}
+          R9_PASSWORD: ${{ secrets.R9_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TEST_CONCURRENCY: "8"
-          TEST_TIMEOUT: "5"
-        run: python proxy-fetch.py
+        run: python proxy-manager.py
 
       - name: 📄 提交 socks5-otc.txt
         if: always()
@@ -46,7 +45,7 @@ jobs:
             else
               git commit -m "🔄 chore: 更新 socks5-otc.txt $(date -u '+%Y-%m-%d')"
               git push
-              echo "✅ 已提交并推送 socks5-otc.txt"
+              echo "✅ 已提交并推送"
             fi
           else
             echo "⚠️ socks5-otc.txt 未生成"
