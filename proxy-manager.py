@@ -10,6 +10,8 @@
 5. 全局测试连通性，删除测试失败的节点
 6. 发送 TG 通知汇总
 
+可选：从 GitHub free-proxy-list 抓取额外代理
+
 需要的配置（环境变量）：
   R9_BASE_URL    设为 9router 首页地址
   R9_PASSWORD    9router API 登录密码
@@ -17,6 +19,7 @@
   TG_CHAT_ID     TG 通知接收 Chat ID（可选）
   PROXY_USER     proxy-socks5.com 登录用户名
   PROXY_PASS     proxy-socks5.com 登录密码
+  PROXY_SOURCE   代理来源：socks5-only 或 github（默认 socks5-only）
 """
 
 import os
@@ -34,6 +37,10 @@ PROXY_SITES_PROXY_LIST_URL = "http://proxy-socks5.com/proxy_list"
 PROXY_USER = os.getenv("PROXY_USER") or "leung0108"
 PROXY_PASS = os.getenv("PROXY_PASS") or "123456"
 
+# GitHub free-proxy-list 配置
+GITHUB_PROXY_LIST_URL = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt"
+GITHUB_PROXY_SOURCE = os.getenv("PROXY_SOURCE") or "socks5-only"  # github 或 socks5-only
+
 # 9router 配置
 BASE_URL = os.getenv("R9_BASE_URL") or "https://mixed-leah-leung0108-a709260b.koyeb.app"
 PASSWORD = os.getenv("R9_PASSWORD") or ""
@@ -44,7 +51,7 @@ TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "8")
 TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "10")
 DEAD_RATIO_LIMIT = float(os.getenv("DEAD_RATIO_LIMIT") or "0.9")
 
-# 解析节点 URL: scheme://ip:port 或 scheme://user:pass@ip:port
+# 解析节点 URL: scheme://user:pass@ip:port
 NODE_RE = re.compile(r"(socks5|http)s?://(?:[^\s#@]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
 
 logging.basicConfig(
@@ -135,12 +142,33 @@ def parse_proxies_from_html(html):
     return proxies
 
 
+def fetch_from_github():
+    """从 GitHub free-proxy-list 抓取代理"""
+    import urllib.request
+    log.info("📥 正在从 GitHub free-proxy-list 抓取代理列表...")
+    try:
+        with urllib.request.urlopen(GITHUB_PROXY_LIST_URL, timeout=30) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+        log.info("✅ GitHub 抓取成功，开始解析...")
+        proxies = parse_proxies_from_html(html)
+        if proxies:
+            proto_count = Counter(p.split("://")[0] for p in proxies)
+            log.info("✅ 解析完成，共 %d 个有效代理", len(proxies))
+            for proto, count in proto_count.most_common():
+                log.info("  %s: %d 个", proto, count)
+        return proxies
+    except Exception as e:
+        log.error("❌ GitHub 抓取失败: %s", e)
+        return []
+
+
 def fetch_proxies():
     """从 proxy-socks5.com 登录抓取所有协议类型的代理"""
     log.info("📥 正在从 proxy-socks5.com 登录抓取代理列表...")
     html = login_and_fetch()
     if not html:
-        return []
+        log.warning("⚠️ proxy-socks5.com 抓取失败，尝试 GitHub 备用源...")
+        return fetch_from_github()
 
     proxies = parse_proxies_from_html(html)
     if proxies:
@@ -148,6 +176,10 @@ def fetch_proxies():
         log.info("✅ 抓取成功，共 %d 个有效代理", len(proxies))
         for proto, count in proto_count.most_common():
             log.info("  %s: %d 个", proto, count)
+    else:
+        log.warning("⚠️ proxy-socks5.com 无有效代理，尝试 GitHub 备用源...")
+        proxies = fetch_from_github()
+
     return proxies
 
 
@@ -314,11 +346,22 @@ def main():
     stats = {"fetched": 0, "added": 0, "deleted": 0, "total": 0, "fail_added": 0, "anomaly": False}
 
     # 1. 从 proxy-socks5.com 登录抓取代理列表
+    # 如果配置了 github 源，先抓取 GitHub 代理作为补充
+    if GITHUB_PROXY_SOURCE == "github":
+        log.info("📥 开始从 GitHub free-proxy-list 抓取代理...")
+        github_proxies = fetch_from_github()
+        log.info("GitHub 抓取完成: %d 个代理", len(github_proxies) if github_proxies else 0)
+    else:
+        github_proxies = []
+
+    # 主要从 proxy-socks5.com 抓取
     new_proxies = fetch_proxies()
-    if not new_proxies:
-        log.error("❌ 未获取到代理节点，退出")
-        sys.exit(1)
-    stats["fetched"] = len(new_proxies)
+    # 去除与 GitHub 源的重复
+    if github_proxies:
+        seen = set(github_proxies)
+        new_proxies = [p for p in new_proxies if p not in seen]
+        log.info("去除 GitHub 重复后剩余: %d 个代理", len(new_proxies))
+    stats["fetched"] = len(new_proxies) + len(github_proxies)
 
     # 2. 登录 9router
     session = make_session()
