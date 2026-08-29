@@ -1,0 +1,67 @@
+name: 9R-Proxy 代理同步
+
+on:
+  schedule:
+    # 北京时间 18:00 = UTC 10:00
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./9r-proxy
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 检出代码
+        uses: actions/checkout@v4
+
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 📦 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 📡 抓取 TG 节点
+        id: fetch
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STR: ${{ secrets.TG_SESSION_STR }}
+        run: python tg-fetch.py
+
+      - name: 🔄 同步 9router 代理池
+        id: sync
+        env:
+          R9_BASE_URL: ${{ vars.R9_BASE_URL }}
+          R9_PASSWORD: ${{ secrets.R9_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python proxy-manager.py
+
+      - name: 📄 提交 socks5-otc.txt
+        if: always()
+        working-directory: .   # 覆盖默认，回到仓库根目录
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          if [ -f 9r-proxy/socks5-otc.txt ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add 9r-proxy/socks5-otc.txt
+            if git diff --cached --quiet; then
+              echo "⏭️ socks5-otc.txt 无变化，跳过提交"
+            else
+              git commit -m "🔄 chore: 更新 9r-proxy socks5-otc.txt"
+              git push
+              echo "✅ 已提交并推送 socks5-otc.txt"
+            fi
+          else
+            echo "⚠️ socks5-otc.txt 未生成，检查上一步是否失败"
+          fi
