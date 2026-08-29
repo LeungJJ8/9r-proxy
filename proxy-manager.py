@@ -50,7 +50,7 @@ TYPE_ALLOWED = {"socks5", "http"}  # 只处理这些类型
 # 并行测试配置
 TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "8")
 TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "10")
-DEAD_RATIO_LIMIT = float(os.getenv("DEAD_RATIO_LIMIT") or "0.9")
+DEAD_RATIO_LIMIT = float(os.getenv("DEAD_RATIO_LIMIT") or "1")
 
 # 解析节点 URL: scheme://user:pass@ip:port
 # 同时支持 socks4, socks5, http, https
