@@ -167,8 +167,8 @@ def fetch_proxies():
     log.info("📥 正在从 proxy-socks5.com 登录抓取代理列表...")
     html = login_and_fetch()
     if not html:
-        log.warning("⚠️ proxy-socks5.com 抓取失败，尝试 GitHub 备用源...")
-        return fetch_from_github()
+        log.warning("⚠️ proxy-socks5.com 抓取失败")
+        return []
 
     proxies = parse_proxies_from_html(html)
     if proxies:
@@ -177,8 +177,7 @@ def fetch_proxies():
         for proto, count in proto_count.most_common():
             log.info("  %s: %d 个", proto, count)
     else:
-        log.warning("⚠️ proxy-socks5.com 无有效代理，尝试 GitHub 备用源...")
-        proxies = fetch_from_github()
+        log.warning("⚠️ proxy-socks5.com 无有效代理")
 
     return proxies
 
@@ -345,23 +344,32 @@ def main():
 
     stats = {"fetched": 0, "added": 0, "deleted": 0, "total": 0, "fail_added": 0, "anomaly": False}
 
-    # 1. 从 proxy-socks5.com 登录抓取代理列表
-    # 如果配置了 github 源，先抓取 GitHub 代理作为补充
-    if GITHUB_PROXY_SOURCE == "github":
-        log.info("📥 开始从 GitHub free-proxy-list 抓取代理...")
-        github_proxies = fetch_from_github()
-        log.info("GitHub 抓取完成: %d 个代理", len(github_proxies) if github_proxies else 0)
-    else:
-        github_proxies = []
+    # 1. 抓取代理列表
+    # 两种模式：
+    #   - PROXY_SOURCE=socks5-only (默认): 只从 proxy-socks5.com 抓取
+    #   - PROXY_SOURCE=github: 同时从 proxy-socks5.com 和 GitHub free-proxy-list 抓取
+    all_proxies = []
 
-    # 主要从 proxy-socks5.com 抓取
-    new_proxies = fetch_proxies()
-    # 去除与 GitHub 源的重复
-    if github_proxies:
-        seen = set(github_proxies)
-        new_proxies = [p for p in new_proxies if p not in seen]
-        log.info("去除 GitHub 重复后剩余: %d 个代理", len(new_proxies))
-    stats["fetched"] = len(new_proxies) + len(github_proxies)
+    # 从 proxy-socks5.com 抓取
+    socks_proxies = fetch_proxies()
+    all_proxies.extend(socks_proxies)
+    log.info("proxy-socks5.com 抓取: %d 个", len(socks_proxies))
+
+    # 如果配置了 github 源，同时抓取 GitHub 代理
+    if GITHUB_PROXY_SOURCE == "github":
+        log.info("📥 同时从 GitHub free-proxy-list 抓取代理...")
+        github_proxies = fetch_from_github()
+        log.info("GitHub 抓取: %d 个", len(github_proxies))
+        all_proxies.extend(github_proxies)
+
+    # 去重
+    new_proxies = list(dict.fromkeys(all_proxies))
+    stats["fetched"] = len(new_proxies)
+    log.info("合并去重后共 %d 个代理", len(new_proxies))
+
+    if not new_proxies:
+        log.error("❌ 未获取到代理节点，退出")
+        sys.exit(1)
 
     # 2. 登录 9router
     session = make_session()
