@@ -8,8 +8,7 @@
 3. 获取现有代理池，以 ip:port（name）为去重键
 4. 只增不减：新增不存在的节点
 5. 全局测试连通性，删除测试失败的节点
-6. 输出最终可用节点到 socks5-otc.txt（覆盖写）
-7. 发送 TG 通知汇总
+6. 发送 TG 通知汇总
 
 需要的配置（环境变量）：
   R9_BASE_URL    设为 9router 首页地址
@@ -31,7 +30,6 @@ PROXY_FILE_URL = "https://raw.githubusercontent.com/yutian81/Keepalive/main/9r-p
 
 BASE_URL = os.getenv("R9_BASE_URL") or "https://9rou.argo.indevs.in"
 PASSWORD = os.getenv("R9_PASSWORD") or ""
-OUTPUT_FILE = "socks5-otc.txt"       # 最终可用节点输出
 TYPE_ALLOWED = {"socks5", "http"}    # 只处理这些类型
 
 # 并行测试配置
@@ -338,14 +336,7 @@ def main():
     log.info("测试完成: 存活 %d, 删除 %d, 异常保留 %d",
              len(live_pools), len(dead_pools), len(error_pools))
 
-    # 6. 输出最终可用节点
-    stats["total"] = len(live_pools)
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        for p in live_pools:
-            f.write(p.get("proxyUrl", "") + "\n")
-    log.info("📄 最终可用节点 %d 个，已写入 %s", stats["total"], OUTPUT_FILE)
-
-    # 7. 发送 TG 通知
+    # 6. 发送 TG 通知
     try:
         send_tg_notification(stats)
     except Exception as e:
