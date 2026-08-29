@@ -52,7 +52,8 @@ TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "10")
 DEAD_RATIO_LIMIT = float(os.getenv("DEAD_RATIO_LIMIT") or "0.9")
 
 # 解析节点 URL: scheme://user:pass@ip:port
-NODE_RE = re.compile(r"(socks5|http)s?://(?:[^\s#@]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
+# 同时支持 socks4, socks5, http, https
+NODE_RE = re.compile(r"(socks4|socks5|http)s?://(?:[^\s#@]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -142,15 +143,58 @@ def parse_proxies_from_html(html):
     return proxies
 
 
+def parse_proxies_from_text(text):
+    """解析纯文本代理列表（GitHub free-proxy-list 格式）"""
+    proxies = []
+    seen = set()
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        # 匹配 socks5://ip:port 或 http://ip:port 或 https://ip:port
+        m = NODE_RE.match(line)
+        if m:
+            protocol = m.group(1).lower()
+            ip = m.group(2)
+            port = m.group(3)
+
+            # socks4 统一转为 socks5
+            if protocol == "socks4":
+                protocol = "socks5"
+
+            # 过滤掉 ip 中包含 x/X 的代理
+            if 'x' in ip.lower():
+                continue
+
+            # 跳过不支持的类型
+            if protocol not in TYPE_ALLOWED:
+                continue
+
+            proxy = f"{protocol}://{ip}:{port}"
+            if proxy not in seen:
+                seen.add(proxy)
+                proxies.append(proxy)
+
+    return proxies
+
+
 def fetch_from_github():
-    """从 GitHub free-proxy-list 抓取代理"""
+    """从 GitHub free-proxy-list 抓取代理（纯文本格式）"""
     import urllib.request
     log.info("📥 正在从 GitHub free-proxy-list 抓取代理列表...")
     try:
         with urllib.request.urlopen(GITHUB_PROXY_LIST_URL, timeout=30) as resp:
-            html = resp.read().decode('utf-8', errors='ignore')
+            content = resp.read().decode('utf-8', errors='ignore')
         log.info("✅ GitHub 抓取成功，开始解析...")
-        proxies = parse_proxies_from_html(html)
+
+        # 先尝试纯文本解析
+        proxies = parse_proxies_from_text(content)
+        if not proxies:
+            # 如果文本解析失败，尝试 HTML 解析
+            proxies = parse_proxies_from_html(content)
+
         if proxies:
             proto_count = Counter(p.split("://")[0] for p in proxies)
             log.info("✅ 解析完成，共 %d 个有效代理", len(proxies))
