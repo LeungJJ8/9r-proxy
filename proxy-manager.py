@@ -430,25 +430,22 @@ def send_tg_notification(stats):
 
 def main():
     log.info("=" * 48)
-    log.info("9router 代理池同步启动（主源 proxy-socks5 + GitHub 备用）")
+    log.info("9router 代理池同步启动（双源: proxy-socks5 + GitHub databay-labs）")
     log.info("目标服务: %s", BASE_URL)
 
     stats = {"fetched": 0, "added": 0, "deleted": 0, "total": 0, "fail_added": 0, "anomaly": False}
 
     # 1. 抓取代理列表
-    # 主源: proxy-socks5.com
+    # 双源同时抓取
+    log.info("📥 正在从 proxy-socks5.com 登录抓取代理列表...")
     socks_proxies = fetch_proxies()
     all_proxies = list(socks_proxies)
     log.info("proxy-socks5.com 抓取: %d 个", len(socks_proxies))
 
-    # 备用源: GitHub free-proxy-list（仅当主源失败/为空时启用）
-    if len(all_proxies) == 0:
-        log.warning("⚠️ proxy-socks5.com 无代理，启用 GitHub free-proxy-list 备用源...")
-        github_proxies = fetch_from_github()
-        log.info("GitHub 备用源抓取: %d 个", len(github_proxies) if github_proxies else 0)
-        all_proxies.extend(github_proxies)
-    else:
-        log.info("主源正常，跳过 GitHub 备用源")
+    log.info("📥 正在从 GitHub databay-labs/free-proxy-list 抓取代理列表...")
+    github_proxies = fetch_from_github()
+    log.info("GitHub 抓取: %d 个", len(github_proxies) if github_proxies else 0)
+    all_proxies.extend(github_proxies)
 
     # 去重
     new_proxies = list(dict.fromkeys(all_proxies))
