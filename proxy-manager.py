@@ -37,8 +37,9 @@ PROXY_SITES_PROXY_LIST_URL = "http://proxy-socks5.com/proxy_list"
 PROXY_USER = os.getenv("PROXY_USER") or "leung0108"
 PROXY_PASS = os.getenv("PROXY_PASS") or "123456"
 
-# GitHub free-proxy-list 配置
-GITHUB_PROXY_LIST_URL = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt"
+# GitHub free-proxy-list 配置 (databay-labs: ip:port 纯文本，3个文件)
+GITHUB_PROXY_LIST_URL = "https://raw.githubusercontent.com/databay-labs/free-proxy-list/master"
+GITHUB_PROXY_FILES = ["socks5.txt", "socks4.txt", "http.txt"]
 GITHUB_PROXY_SOURCE = os.getenv("PROXY_SOURCE") or "github"  # github 或 socks5-only
 
 # 9router 配置
@@ -181,26 +182,73 @@ def parse_proxies_from_text(text):
 
 
 def fetch_from_github():
-    """从 GitHub free-proxy-list 抓取代理（纯文本格式）"""
+    """从 GitHub databay-labs/free-proxy-list 抓取代理（3个纯文本文件）"""
     import urllib.request
-    log.info("📥 正在从 GitHub free-proxy-list 抓取代理列表...")
-    try:
-        with urllib.request.urlopen(GITHUB_PROXY_LIST_URL, timeout=30) as resp:
-            content = resp.read().decode('utf-8', errors='ignore')
-        log.info("✅ GitHub 抓取成功，开始解析...")
+    log.info("📥 正在从 GitHub databay-labs/free-proxy-list 抓取代理列表...")
 
-        # 先尝试纯文本解析
-        proxies = parse_proxies_from_text(content)
-        if not proxies:
-            # 如果文本解析失败，尝试 HTML 解析
-            proxies = parse_proxies_from_html(content)
+    all_proxies = []
+
+    try:
+        for filename, default_proto in [
+            ("socks5.txt", "socks5"),
+            ("socks4.txt", "socks4"),
+            ("http.txt", "http"),
+        ]:
+            url = f"{GITHUB_PROXY_LIST_URL}/{filename}"
+            log.info("  抓取 %s ...", filename)
+            try:
+                with urllib.request.urlopen(url, timeout=30) as resp:
+                    content = resp.read().decode('utf-8', errors='ignore')
+
+                # 解析 ip:port 格式
+                count = 0
+                for line in content.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+
+                    # ip:port 格式
+                    if ':' in line:
+                        ip, port = line.split(':', 1)
+                        ip = ip.strip()
+                        port = port.strip()
+
+                        # 过滤 x/X 掩码 IP
+                        if 'x' in ip.lower():
+                            continue
+
+                        # socks4 转 socks5
+                        proto = default_proto
+                        if proto == "socks4":
+                            proto = "socks5"
+
+                        # 只保留允许的类型
+                        if proto not in TYPE_ALLOWED:
+                            continue
+
+                        proxy = f"{proto}://{ip}:{port}"
+                        all_proxies.append(proxy)
+                        count += 1
+
+                log.info("    %s: %d 个 (%s)", filename, count, default_proto)
+            except Exception as e:
+                log.warning("    %s 抓取失败: %s", filename, e)
+
+        # 去重
+        seen = set()
+        proxies = []
+        for p in all_proxies:
+            if p not in seen:
+                seen.add(p)
+                proxies.append(p)
 
         if proxies:
             proto_count = Counter(p.split("://")[0] for p in proxies)
-            log.info("✅ 解析完成，共 %d 个有效代理", len(proxies))
+            log.info("✅ GitHub 解析完成，共 %d 个有效代理", len(proxies))
             for proto, count in proto_count.most_common():
                 log.info("  %s: %d 个", proto, count)
         return proxies
+
     except Exception as e:
         log.error("❌ GitHub 抓取失败: %s", e)
         return []
