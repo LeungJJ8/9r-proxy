@@ -14,7 +14,7 @@
 
 | 变量名 | 描述 |
 |--------|------|
-| `R9_BASE_URL` | 9router 地址（默认 `https://9rou.argo.indevs.in`） |
+| `R9_BASE_URL` | 9router 地址（默认 `https://mixed-leah-leung0108-a709260b.koyeb.app`） |
 | `R9_PASSWORD` | 9router API 登录密码 |
 | `PROXY_USER` | proxy-socks5.com 登录用户名 |
 | `PROXY_PASS` | proxy-socks5.com 登录密码 |

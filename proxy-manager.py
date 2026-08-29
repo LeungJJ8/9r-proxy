@@ -35,7 +35,7 @@ PROXY_USER = os.getenv("PROXY_USER") or "leung0108"
 PROXY_PASS = os.getenv("PROXY_PASS") or "123456"
 
 # 9router 配置
-BASE_URL = os.getenv("R9_BASE_URL") or "https://9rou.argo.indevs.in"
+BASE_URL = os.getenv("R9_BASE_URL") or "https://mixed-leah-leung0108-a709260b.koyeb.app"
 PASSWORD = os.getenv("R9_PASSWORD") or ""
 TYPE_ALLOWED = {"socks5", "http"}  # 只处理这些类型
 
