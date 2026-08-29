@@ -168,7 +168,6 @@ def fetch_proxies():
     html = login_and_fetch()
     if not html:
         log.warning("⚠️ proxy-socks5.com 抓取失败")
-        return []
 
     proxies = parse_proxies_from_html(html)
     if proxies:
@@ -339,28 +338,24 @@ def send_tg_notification(stats):
 
 def main():
     log.info("=" * 48)
-    log.info("9router 代理池同步启动（proxy-socks5.com 直连抓取）")
+    log.info("9router 代理池同步启动（双源抓取）")
     log.info("目标服务: %s", BASE_URL)
 
     stats = {"fetched": 0, "added": 0, "deleted": 0, "total": 0, "fail_added": 0, "anomaly": False}
 
     # 1. 抓取代理列表
-    # 两种模式：
-    #   - PROXY_SOURCE=socks5-only (默认): 只从 proxy-socks5.com 抓取
-    #   - PROXY_SOURCE=github: 同时从 proxy-socks5.com 和 GitHub free-proxy-list 抓取
+    # 始终从 proxy-socks5.com 抓取
+    socks_proxies = fetch_proxies()
     all_proxies = []
 
-    # 从 proxy-socks5.com 抓取
-    socks_proxies = fetch_proxies()
     all_proxies.extend(socks_proxies)
     log.info("proxy-socks5.com 抓取: %d 个", len(socks_proxies))
 
-    # 如果配置了 github 源，同时抓取 GitHub 代理
-    if GITHUB_PROXY_SOURCE == "github":
-        log.info("📥 同时从 GitHub free-proxy-list 抓取代理...")
-        github_proxies = fetch_from_github()
-        log.info("GitHub 抓取: %d 个", len(github_proxies))
-        all_proxies.extend(github_proxies)
+    # 始终尝试从 GitHub free-proxy-list 抓取
+    log.info("📥 同时从 GitHub free-proxy-list 抓取代理...")
+    github_proxies = fetch_from_github()
+    log.info("GitHub 抓取: %d 个", len(github_proxies) if github_proxies else 0)
+    all_proxies.extend(github_proxies)
 
     # 去重
     new_proxies = list(dict.fromkeys(all_proxies))
