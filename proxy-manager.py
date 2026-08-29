@@ -39,7 +39,7 @@ PROXY_PASS = os.getenv("PROXY_PASS") or "123456"
 
 # GitHub free-proxy-list 配置
 GITHUB_PROXY_LIST_URL = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt"
-GITHUB_PROXY_SOURCE = os.getenv("PROXY_SOURCE") or "socks5-only"  # github 或 socks5-only
+GITHUB_PROXY_SOURCE = os.getenv("PROXY_SOURCE") or "github"  # github 或 socks5-only
 
 # 9router 配置
 BASE_URL = os.getenv("R9_BASE_URL") or "https://mixed-leah-leung0108-a709260b.koyeb.app"
