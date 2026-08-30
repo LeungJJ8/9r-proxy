@@ -204,7 +204,7 @@ def send_tg_notification(stats):
             f"📥 <b>抓取节点</b>：{stats['fetched']} 个\n"
             f"➕ <b>新增</b>：{stats['added']} 个\n"
             f"❌ <b>删除</b>：{stats['deleted']} 个（测试不通）\n"
-            f"✅ <b>最终可用</b>：{len(live_pools)} 个\n"
+            f"✅ <b>最终可用</b>：{stats['total']} 个\n"
         )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -333,6 +333,9 @@ def main():
 
     log.info("测试完成: 存活 %d, 删除 %d, 异常保留 %d", len(live_pools), len(dead_pools), len(error_pools))
 
+    # 设置最终可用数量
+    stats["total"] = len(live_pools)
+
     # 6. 发送 TG 通知
     try:
         send_tg_notification(stats)
@@ -340,7 +343,7 @@ def main():
         log.error("❌ 发送通知异常: %s", e)
 
     log.info("=" * 48)
-    log.info("📊 同步完成: 下载 %d, 新增 %d, 删除 %d, 最终 %d", stats["fetched"], stats["added"], stats["deleted"], len(live_pools))
+    log.info("📊 同步完成: 下载 %d, 新增 %d, 删除 %d, 最终 %d", stats["fetched"], stats["added"], stats["deleted"], stats["total"])
 
 
 if __name__ == "__main__":
