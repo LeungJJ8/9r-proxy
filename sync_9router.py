@@ -204,7 +204,7 @@ def send_tg_notification(stats):
             f"📥 <b>抓取节点</b>：{stats['fetched']} 个\n"
             f"➕ <b>新增</b>：{stats['added']} 个\n"
             f"❌ <b>删除</b>：{stats['deleted']} 个（测试不通）\n"
-            f"✅ <b>最终可用</b>：{stats['total']} 个\n"
+            f"✅ <b>最终可用</b>：{len(live_pools)} 个\n"
         )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
