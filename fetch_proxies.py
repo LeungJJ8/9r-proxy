@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """
-代理抓取脚本（第一步）
+代理抓取脚本（第一步）— 多源抓取
 
-从 proxy-socks5.com 登录抓取代理列表，过滤带 x/X 掩码的 IP，
-本地测试连通性后，输出可用代理列表。
+从多个源抓取代理列表，过滤带 x/X 掩码的 IP，
+只保留 socks5/http 类型，本地测试连通性后，输出可用代理列表。
+
+抓取源：
+  1. proxy-socks5.com  （登录抓取，HTML 格式）
+  2. iplocate/free-proxy-list  （all-proxies.txt，protocol://ip:port 格式）
+  3. databay-labs socks5.txt   （ip:port 格式，socks5）
+  4. databay-labs http.txt     （ip:port 格式，http）
 
 输入（环境变量）：
   PROXY_USER    proxy-socks5.com 登录用户名
@@ -28,6 +34,15 @@ PROXY_SITES_PROXY_LIST_URL = "http://proxy-socks5.com/proxy_list"
 PROXY_USER = os.getenv("PROXY_USER") or ""
 PROXY_PASS = os.getenv("PROXY_PASS") or ""
 
+# GitHub 源配置
+GITHUB_SOURCES = [
+    # (URL, 默认协议, 格式类型)
+    # 格式: "url" = protocol://ip:port   |   "ip:port" = 裸 ip:port
+    ("https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt", None, "url"),
+    ("https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/socks5.txt", "socks5", "ip:port"),
+    ("https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/http.txt", "http", "ip:port"),
+]
+
 # 输出文件
 OUTPUT_FILE = os.getenv("PROXY_OUTPUT") or "proxies.txt"
 
@@ -36,7 +51,7 @@ TYPE_ALLOWED = {"socks5", "http"}
 
 # 本地连通性测试配置
 TEST_URL = os.getenv("PROXY_TEST_URL") or "http://www.gstatic.com/generate_204"
-TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "20")
+TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "100")
 TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "8")
 
 # 解析节点 URL: scheme://user:pass@ip:port
@@ -54,6 +69,8 @@ HEADERS = {
     'Referer': PROXY_SITES_LOGIN_URL
 }
 
+
+# ================= proxy-socks5.com =================
 
 def login_and_fetch():
     """登录 proxy-socks5.com 并获取代理列表页面 HTML"""
@@ -90,7 +107,7 @@ def has_x_ip(proxy):
 
 
 def parse_proxies_from_html(html):
-    """解析代理列表，提取协议类型 + IP:Port，并过滤掉带 x/X 的 IP"""
+    """解析 proxy-socks5.com HTML 代理列表，过滤 x/X + 只保留允许类型"""
     proxies = []
     seen = set()
     allowed = TYPE_ALLOWED  # {"socks5", "http"}
@@ -130,9 +147,109 @@ def parse_proxies_from_html(html):
     return proxies
 
 
+def fetch_proxy_sites_com():
+    """从 proxy-socks5.com 登录抓取代理"""
+    log.info("📥 [源1] 从 proxy-socks5.com 登录抓取...")
+    html = login_and_fetch()
+    if not html:
+        log.warning("  ⚠️ proxy-socks5.com 抓取失败")
+        return []
+    proxies = parse_proxies_from_html(html)
+    log.info("  ✅ proxy-socks5.com: %d 个", len(proxies))
+    return proxies
+
+
+# ================= GitHub 源 =================
+
+def parse_url_format(content):
+    """解析 protocol://ip:port 格式（iplocate all-proxies.txt）"""
+    proxies = []
+    seen = set()
+    for line in content.splitlines():
+        m = NODE_RE.match(line.strip())
+        if not m:
+            continue
+        protocol = m.group(1).lower()
+        ip = m.group(2)
+        port = m.group(3)
+        # socks4 统一转 socks5；跳过非允许类型；过滤 x/X
+        if protocol == "socks4":
+            protocol = "socks5"
+        if protocol not in TYPE_ALLOWED:
+            continue
+        if 'x' in ip.lower():
+            continue
+        proxy = f"{protocol}://{ip}:{port}"
+        if proxy not in seen:
+            seen.add(proxy)
+            proxies.append(proxy)
+    return proxies
+
+
+def parse_ip_port_format(content, default_proto):
+    """解析裸 ip:port 格式（databay-labs *.txt），default_proto 指定协议"""
+    proxies = []
+    seen = set()
+    line_re = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        m = line_re.match(line)
+        if not m:
+            continue
+        ip = m.group(1)
+        port = m.group(2)
+        # 过滤 x/X 掩码 IP
+        if 'x' in ip.lower():
+            continue
+        protocol = default_proto
+        if protocol == "socks4":
+            protocol = "socks5"
+        if protocol not in TYPE_ALLOWED:
+            continue
+        proxy = f"{protocol}://{ip}:{port}"
+        if proxy not in seen:
+            seen.add(proxy)
+            proxies.append(proxy)
+    return proxies
+
+
+def fetch_from_github():
+    """从所有 GitHub 源抓取代理"""
+    all_proxies = []
+    seen = set()
+    for (url, default_proto, fmt) in GITHUB_SOURCES:
+        label = url.split("/")[-1]
+        log.info("📥 [GitHub] 抓取 %s ...", label)
+        try:
+            resp = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code != 200:
+                log.warning("  ⚠️ %s HTTP %s", label, resp.status_code)
+                continue
+            content = resp.text
+
+            # 按格式解析
+            if fmt == "url":
+                parsed = parse_url_format(content)
+            else:
+                parsed = parse_ip_port_format(content, default_proto)
+
+            log.info("  ✅ %s: %d 个", label, len(parsed))
+            for p in parsed:
+                if p not in seen:
+                    seen.add(p)
+                    all_proxies.append(p)
+        except Exception as e:
+            log.warning("  ⚠️ %s 抓取异常: %s", label, e)
+
+    return all_proxies
+
+
+# ================= 本地连通性测试 =================
+
 def test_proxy(proxy):
     """本地测试单个代理连通性"""
-    proto = proxy.split("://")[0]
     proxies_dict = {
         "http": proxy,
         "https": proxy,
@@ -155,46 +272,57 @@ def test_proxies(proxies):
              len(proxies), TEST_CONCURRENCY, TEST_TIMEOUT, TEST_URL)
 
     alive = []
-    dead = []
     with ThreadPoolExecutor(max_workers=TEST_CONCURRENCY) as ex:
         futures = [ex.submit(test_proxy, p) for p in proxies]
         for fut in as_completed(futures):
             proxy, ok = fut.result()
             if ok:
                 alive.append(proxy)
-            else:
-                dead.append(proxy)
 
-    log.info("本地测试完成: 可用 %d 个, 不通 %d 个", len(alive), len(dead))
+    log.info("本地测试完成: 可用 %d 个, 不通 %d 个", len(alive), len(proxies) - len(alive))
     return alive
 
 
+# ================= 主流程 =================
+
 def main():
     log.info("=" * 48)
-    log.info("代理抓取启动（proxy-socks5.com + 本地测试）")
+    log.info("代理抓取启动（多源 + 本地测试）")
     log.info("=" * 48)
 
     if not PROXY_USER or not PROXY_PASS:
         log.error("❌ 缺少 PROXY_USER 或 PROXY_PASS 环境变量")
         sys.exit(1)
 
-    html = login_and_fetch()
-    if not html:
-        log.error("❌ proxy-socks5.com 抓取失败")
+    # 从所有源抓取
+    all_proxies = []
+    seen = set()
+
+    # 源1: proxy-socks5.com
+    s1 = fetch_proxy_sites_com()
+    for p in s1:
+        if p not in seen:
+            seen.add(p)
+            all_proxies.append(p)
+
+    # GitHub 源
+    s2 = fetch_from_github()
+    for p in s2:
+        if p not in seen:
+            seen.add(p)
+            all_proxies.append(p)
+
+    if not all_proxies:
+        log.error("❌ 所有源均未获取到代理，退出")
         sys.exit(1)
 
-    proxies = parse_proxies_from_html(html)
-    if not proxies:
-        log.warning("⚠️ 未解析到有效代理（可能登录失败或页面结构变化）")
-        sys.exit(1)
-
-    proto_count = Counter(p.split("://")[0] for p in proxies)
-    log.info("✅ 抓取成功，共 %d 个代理（过滤 x/X 后）", len(proxies))
+    proto_count = Counter(p.split("://")[0] for p in all_proxies)
+    log.info("✅ 合并去重后共 %d 个代理", len(all_proxies))
     for proto, count in proto_count.most_common():
         log.info("  %s: %d 个", proto, count)
 
     # 本地测试连通性
-    alive = test_proxies(proxies)
+    alive = test_proxies(all_proxies)
     if not alive:
         log.error("❌ 所有代理本地测试均不通，退出")
         sys.exit(1)
