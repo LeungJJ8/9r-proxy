@@ -34,8 +34,8 @@ from collections import Counter
 # proxy-socks5.com 配置
 PROXY_SITES_LOGIN_URL = "http://proxy-socks5.com/login"
 PROXY_SITES_PROXY_LIST_URL = "http://proxy-socks5.com/proxy_list"
-PROXY_USER = os.getenv("PROXY_USER") or "leung0108"
-PROXY_PASS = os.getenv("PROXY_PASS") or "123456"
+PROXY_USER = os.getenv("PROXY_USER") or ""
+PROXY_PASS = os.getenv("PROXY_PASS") or ""
 
 # GitHub free-proxy-list 配置 (databay-labs: ip:port 纯文本，3个文件)
 GITHUB_PROXY_LIST_URL = "https://raw.githubusercontent.com/databay-labs/free-proxy-list/master"
