@@ -3,20 +3,21 @@
 代理抓取脚本（第一步）
 
 从 proxy-socks5.com 登录抓取代理列表，过滤带 x/X 掩码的 IP，
-输出纯净的代理列表。
+本地测试连通性后，输出可用代理列表。
 
 输入（环境变量）：
   PROXY_USER    proxy-socks5.com 登录用户名
   PROXY_PASS    proxy-socks5.com 登录密码
 
 输出：
-  proxies.txt   抓取到的代理列表（protocol://ip:port 每行一个）
+  proxies.txt   测试通过的可用代理列表（protocol://ip:port 每行一个）
 """
 
 import os
 import re
 import sys
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 
 import requests
@@ -32,6 +33,11 @@ OUTPUT_FILE = os.getenv("PROXY_OUTPUT") or "proxies.txt"
 
 # 只处理这些类型
 TYPE_ALLOWED = {"socks5", "http"}
+
+# 本地连通性测试配置
+TEST_URL = os.getenv("PROXY_TEST_URL") or "http://www.gstatic.com/generate_204"
+TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "20")
+TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "8")
 
 # 解析节点 URL: scheme://user:pass@ip:port
 NODE_RE = re.compile(r"(socks4|socks5|http)s?://(?:[^\s#@]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
@@ -122,9 +128,48 @@ def parse_proxies_from_html(html):
     return proxies
 
 
+def test_proxy(proxy):
+    """本地测试单个代理连通性"""
+    proto = proxy.split("://")[0]
+    proxies_dict = {
+        "http": proxy,
+        "https": proxy,
+    }
+    try:
+        resp = requests.get(
+            TEST_URL,
+            proxies=proxies_dict,
+            timeout=TEST_TIMEOUT,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        return proxy, resp.status_code == 204 or resp.status_code == 200
+    except Exception:
+        return proxy, False
+
+
+def test_proxies(proxies):
+    """并行本地测试所有代理，返回可用列表"""
+    log.info("🔍 开始本地测试 %d 个代理（并发 %d，超时 %ds，目标 %s）...",
+             len(proxies), TEST_CONCURRENCY, TEST_TIMEOUT, TEST_URL)
+
+    alive = []
+    dead = []
+    with ThreadPoolExecutor(max_workers=TEST_CONCURRENCY) as ex:
+        futures = [ex.submit(test_proxy, p) for p in proxies]
+        for fut in as_completed(futures):
+            proxy, ok = fut.result()
+            if ok:
+                alive.append(proxy)
+            else:
+                dead.append(proxy)
+
+    log.info("本地测试完成: 可用 %d 个, 不通 %d 个", len(alive), len(dead))
+    return alive
+
+
 def main():
     log.info("=" * 48)
-    log.info("代理抓取启动（proxy-socks5.com）")
+    log.info("代理抓取启动（proxy-socks5.com + 本地测试）")
     log.info("=" * 48)
 
     if not PROXY_USER or not PROXY_PASS:
@@ -141,17 +186,26 @@ def main():
         log.warning("⚠️ 未解析到有效代理（可能登录失败或页面结构变化）")
         sys.exit(1)
 
-    if proxies:
-        proto_count = Counter(p.split("://")[0] for p in proxies)
-        log.info("✅ 抓取成功，共 %d 个有效代理", len(proxies))
-        for proto, count in proto_count.most_common():
-            log.info("  %s: %d 个", proto, count)
+    proto_count = Counter(p.split("://")[0] for p in proxies)
+    log.info("✅ 抓取成功，共 %d 个代理（过滤 x/X 后）", len(proxies))
+    for proto, count in proto_count.most_common():
+        log.info("  %s: %d 个", proto, count)
 
-    # 写入输出文件
+    # 本地测试连通性
+    alive = test_proxies(proxies)
+    if not alive:
+        log.error("❌ 所有代理本地测试均不通，退出")
+        sys.exit(1)
+
+    # 写入输出文件（仅可用代理）
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        for p in proxies:
+        for p in alive:
             f.write(p + "\n")
-    log.info("💾 已写入 %s (%d 个代理)", OUTPUT_FILE, len(proxies))
+
+    alive_count = Counter(p.split("://")[0] for p in alive)
+    log.info("💾 已写入 %s (%d 个可用代理)", OUTPUT_FILE, len(alive))
+    for proto, count in alive_count.most_common():
+        log.info("  %s: %d 个", proto, count)
 
 
 if __name__ == "__main__":
