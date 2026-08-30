@@ -93,6 +93,7 @@ def parse_proxies_from_html(html):
     """解析代理列表，提取协议类型 + IP:Port，并过滤掉带 x/X 的 IP"""
     proxies = []
     seen = set()
+    allowed = TYPE_ALLOWED  # {"socks5", "http"}
 
     # 方法1: 从 badge-type + data-proxy 匹配
     card_pattern = r'<div class="proxy-card"[^>]*data-proxy="([^"]+)"[^>]*>.*?badge badge-type[^>]*>(\w+)<'
@@ -100,7 +101,8 @@ def parse_proxies_from_html(html):
         ip_port = match.group(1)
         protocol = match.group(2).lower()
         proxy = f"{protocol}://{ip_port}"
-        if proxy not in seen and not has_x_ip(proxy):
+        # 只保留允许的类型
+        if proxy not in seen and not has_x_ip(proxy) and protocol in allowed:
             seen.add(proxy)
             proxies.append(proxy)
 
@@ -121,7 +123,7 @@ def parse_proxies_from_html(html):
                     ip = ip_match.group(1)
                     port = port_match.group(1) if port_match else "1080"
                     proxy = f"{protocol}://{ip}:{port}"
-                    if proxy not in seen and not has_x_ip(proxy):
+                    if proxy not in seen and not has_x_ip(proxy) and protocol in allowed:
                         seen.add(proxy)
                         proxies.append(proxy)
 
