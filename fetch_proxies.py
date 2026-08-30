@@ -41,6 +41,7 @@ GITHUB_SOURCES = [
     ("https://raw.githubusercontent.com/iplocate/free-proxy-list/main/all-proxies.txt", None, "url"),
     ("https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/socks5.txt", "socks5", "ip:port"),
     ("https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/http.txt", "http", "ip:port"),
+    ("https://raw.githubusercontent.com/yutian81/Keepalive/main/9r-proxy/socks5-otc.txt", None, "url"),
 ]
 
 # 输出文件
