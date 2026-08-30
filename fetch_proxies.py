@@ -50,7 +50,7 @@ OUTPUT_FILE = os.getenv("PROXY_OUTPUT") or "proxies.txt"
 TYPE_ALLOWED = {"socks5", "http"}
 
 # 本地连通性测试配置
-TEST_URL = os.getenv("PROXY_TEST_URL") or "https://ip.gs/"
+TEST_URL = os.getenv("PROXY_TEST_URL") or "https://api.ip.sb/ip"
 TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "100")
 TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "8")
 
