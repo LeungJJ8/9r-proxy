@@ -3,7 +3,7 @@ name: 9R-Proxy 代理同步
 on:
   schedule:
     # 北京时间 18:00 = UTC 10:00
-    - cron: "0 * * * *"
+    - cron: "0 10 * * *"
   workflow_dispatch:
 
 jobs:
@@ -25,12 +25,18 @@ jobs:
           pip install requests==2.31.0
           pip install beautifulsoup4==4.12.0
 
-      - name: 🔄 同步代理池
+      - name: 📥 抓取代理
+        env:
+          PROXY_USER: ${{ secrets.PROXY_USER }}
+          PROXY_PASS: ${{ secrets.PROXY_PASS }}
+          PROXY_OUTPUT: proxies.txt
+        run: python fetch_proxies.py
+
+      - name: 🔄 同步到 9router
         env:
           R9_BASE_URL: ${{ secrets.R9_BASE_URL }}
           R9_PASSWORD: ${{ secrets.R9_PASSWORD }}
-          PROXY_USER: ${{ secrets.PROXY_USER }}
-          PROXY_PASS: ${{ secrets.PROXY_PASS }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python proxy-manager.py
+          PROXY_INPUT: proxies.txt
+        run: python sync_9router.py
