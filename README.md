@@ -15,7 +15,7 @@
 
 | 变量名 | 描述 |
 |--------|------|
-| `R9_BASE_URL` | 9router 地址（默认 `https://mixed-leah-leung0108-a709260b.koyeb.app`） |
+| `R9_BASE_URL` | 9router 地址 |
 | `R9_PASSWORD` | 9router API 登录密码 |
 | `PROXY_USER` | proxy-socks5.com 登录用户名 |
 | `PROXY_PASS` | proxy-socks5.com 登录密码 |
@@ -33,6 +33,6 @@ python proxy-manager.py
 环境变量：
 - `R9_BASE_URL` — 9router 地址
 - `R9_PASSWORD` — 9router 登录密码
-- `PROXY_USER` — proxy-socks5.com 用户名（默认 `leung0108`）
-- `PROXY_PASS` — proxy-socks5.com 密码（默认 `123456`）
+- `PROXY_USER` — proxy-socks5.com 用户名
+- `PROXY_PASS` — proxy-socks5.com 密码
 - `PROXY_SOURCE` — 代理来源（默认 `socks5-only`，可选 `github`）
