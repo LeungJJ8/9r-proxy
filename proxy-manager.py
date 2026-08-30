@@ -43,7 +43,7 @@ GITHUB_PROXY_FILES = ["socks5.txt", "socks4.txt", "http.txt"]
 GITHUB_PROXY_SOURCE = os.getenv("PROXY_SOURCE") or "github"  # github 或 socks5-only
 
 # 9router 配置
-BASE_URL = os.getenv("R9_BASE_URL") or "https://mixed-leah-leung0108-a709260b.koyeb.app"
+BASE_URL = os.getenv("R9_BASE_URL") or ""
 PASSWORD = os.getenv("R9_PASSWORD") or ""
 TYPE_ALLOWED = {"socks5", "http"}  # 只处理这些类型
 
