@@ -52,7 +52,7 @@ TYPE_ALLOWED = {"socks5", "http"}
 # 本地连通性测试配置
 TEST_URL = os.getenv("PROXY_TEST_URL") or "https://api.ip.sb/geoip"
 TEST_CONCURRENCY = int(os.getenv("TEST_CONCURRENCY") or "100")
-TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "8")
+TEST_TIMEOUT = int(os.getenv("TEST_TIMEOUT") or "4")
 
 # 解析节点 URL: scheme://user:pass@ip:port
 NODE_RE = re.compile(r"(socks4|socks5|http)s?://(?:[^\s#@]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)")
